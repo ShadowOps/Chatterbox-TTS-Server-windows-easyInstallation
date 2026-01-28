@@ -3,6 +3,7 @@
 import os
 os.environ["TRANSFORMERS_ATTN_IMPLEMENTATION"] = "eager"
 import logging
+logger = logging.getLogger(__name__) # added for chucking debug logging
 import random
 import numpy as np
 import torch
@@ -406,6 +407,9 @@ def synthesize(
         else:
             # اگر به هر دلیلی مدل استاندارد بارگذاری شده باشد (مثلاً قبل از فراخوانی load_multilingual_model)
             logger.info("Synthesizing with standard English model.")
+            logger.info(f"=== Processing text ===")
+            logger.info(f"Text length: {len(text)} characters")
+            logger.info(f"Text preview: {text[:200] if len(text) > 200 else text}")
             wav_tensor = active_model.generate(
                 text=text,
                 audio_prompt_path=audio_prompt_path,

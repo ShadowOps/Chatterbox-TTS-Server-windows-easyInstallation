@@ -1053,7 +1053,79 @@ def chunk_text_by_sentences(
         segment_text,
     ) in processed_segments:
         segment_len = len(segment_text)
+        
+        # Define safety maximum (model's technical limit)
+        SAFETY_MAX = 2000
+        
+        # Use the user's chunk_size, but cap at safety maximum
+        effective_max = min(chunk_size * 4, SAFETY_MAX) if chunk_size != float("inf") else SAFETY_MAX
+        
+        # Check if this single segment exceeds our effective maximum
+        if segment_len > effective_max:
+            # First, flush any existing chunks
+            if current_chunk_sentences:
+                text_chunks.append(" ".join(current_chunk_sentences))
+                current_chunk_sentences = []
+                current_chunk_length = 0
+            
+            logger.warning(
+                f"A single segment (length {segment_len}) exceeds safe limit ({effective_max} chars). "
+                f"Force-splitting to respect chunk_size={chunk_size}."
+            )
+            
+            # Use regex to split by sentences while preserving punctuation
+            sentence_pattern = r'(?<=[.!?])\s+(?=[A-Z])'
+            sentences = re.split(sentence_pattern, segment_text)
+            
+            # If regex doesn't split well (no sentence boundaries), split by word boundaries
+            if len(sentences) == 1:
+                logger.warning("No sentence boundaries found. Splitting by word boundaries.")
+                words = segment_text.split()
+                sentences = []
+                temp = ""
+                for word in words:
+                    if len(temp) + len(word) + 1 > chunk_size:
+                        sentences.append(temp)
+                        temp = word
+                    else:
+                        temp += (" " if temp else "") + word
+                if temp:
+                    sentences.append(temp)
+            
+            # Group sentences into chunks respecting chunk_size
+            temp_chunk = ""
+            for sentence in sentences:
+                sentence = sentence.strip()
+                if not sentence:
+                    continue
+                
+                # Respect the user's chunk_size setting
+                if len(temp_chunk) + len(sentence) + 1 <= chunk_size:
+                    temp_chunk += (" " if temp_chunk else "") + sentence
+                else:
+                    if temp_chunk:
+                        text_chunks.append(temp_chunk)
+                    temp_chunk = sentence
+                    
+                    # Safety check: if single sentence still exceeds safety max, split it by words
+                    if len(temp_chunk) > SAFETY_MAX:
+                        logger.error(f"Single sentence is {len(temp_chunk)} chars, exceeds SAFETY_MAX. Splitting by words.")
+                        words = temp_chunk.split()
+                        temp_chunk = ""
+                        for word in words:
+                            if len(temp_chunk) + len(word) + 1 <= chunk_size:
+                                temp_chunk += (" " if temp_chunk else "") + word
+                            else:
+                                if temp_chunk:
+                                    text_chunks.append(temp_chunk)
+                                temp_chunk = word
+            
+            if temp_chunk:
+                text_chunks.append(temp_chunk)
+            
+            continue  # Skip normal processing for this oversized segment
 
+        # Normal processing for segments under effective_max
         if not current_chunk_sentences:
             current_chunk_sentences.append(segment_text)
             current_chunk_length = segment_len
@@ -1065,15 +1137,14 @@ def chunk_text_by_sentences(
                 text_chunks.append(" ".join(current_chunk_sentences))
             current_chunk_sentences = [segment_text]
             current_chunk_length = segment_len
-
+        
+        # Log if a segment exceeds chunk_size but is under effective_max (will form its own chunk)
         if current_chunk_length > chunk_size and len(current_chunk_sentences) == 1:
             logger.info(
                 f"A single segment (length {current_chunk_length}) exceeds chunk_size {chunk_size}. "
                 f"It will form its own chunk."
             )
-            text_chunks.append(" ".join(current_chunk_sentences))
-            current_chunk_sentences = []
-            current_chunk_length = 0
+
 
     if current_chunk_sentences:
         text_chunks.append(" ".join(current_chunk_sentences))
